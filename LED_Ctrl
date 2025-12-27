@@ -1,0 +1,46 @@
+/*
+ STEP1 APB2ENR -GPIO clock
+ STEP2 CRH - GPIO Configuration; OUTPUT Mode with push-pull 10MHz
+ STEP3 ODR - Output Data Register
+ */
+#include "stdint.h" // to use uint32_t
+
+//STEP1
+#define STEP1_RCC_BASE 0x40021000UL
+#define STEP1_RCC_APB2ENR_OFFSET 0x18UL
+
+//STEP2
+#define STEP2_GPIOC_BASE 0x40011000UL
+#define STEP2_GPIOC_CRH_OFFSET 0x04UL
+
+//STEP3
+#define STEP3_GPIOC_ODR_OFFSET 0x0CUL
+
+
+//base + offset --> real address
+#define STEP1_RCC_APB2ENR (*((volatile uint32_t *) (STEP1_RCC_BASE + STEP1_RCC_APB2ENR_OFFSET))) //STEP1
+#define STEP2_GPIOC_CRH (*((volatile uint32_t *) (STEP2_GPIOC_BASE + STEP2_GPIOC_CRH_OFFSET))) // STEP2
+#define STEP3_GPIOc_ODR (*((volatile uint32_t *) (STEP2_GPIOC_BASE + STEP3_GPIOC_ODR_OFFSET)))//STEP3
+
+int flag = 0; //0, 1
+
+int main(void){
+
+	STEP1_RCC_APB2ENR |= 0x00000010; //GPIOC clock enable
+
+	STEP2_GPIOC_CRH &= ~(0x00F00000); // clear bits first
+	STEP2_GPIOC_CRH |= 0x00100000; // output push-pull, 10MHz
+
+	while(1){
+
+		if(flag == 1){
+			STEP3_GPIOc_ODR &= ~(0x00002000); // PC13 LOW, LED ON
+		}
+
+		else{
+			STEP3_GPIOc_ODR |= 0x00002000; // PC13 HIGH, LED OFF
+		}
+
+	}
+}
+
