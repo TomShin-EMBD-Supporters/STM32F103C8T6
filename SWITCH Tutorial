@@ -1,0 +1,38 @@
+#include "stm32f1xx.h" //to use predefined registers
+
+int main(void){
+
+
+	//STEP1
+	//Clock Configuration
+	RCC->APB2ENR &= ~(0x00000014);
+	RCC->APB2ENR |= 0x00000014;
+	//IOPAEN: IO port A clock enable
+	//IOPCEN: IO port C clock enable
+
+
+	//STEP2
+	//Port Configuration
+	//LED(output) Related Code PC13
+	GPIOC->CRH &= ~(0x00F00000);
+	GPIOC->CRH |= 0x00100000;//output mode & Maximum output speed 10 MHz
+
+
+	//STEP3
+	//Switch(input) Related Code PA0
+	GPIOA->CRL &= ~(0x0000000F);
+	GPIOA->CRL |= 0x00000008;// input mode & input (pull-up/pull-down)
+	GPIOA->ODR |= 0x00000001;//input pull-up
+
+
+	//STEP4
+	while(1){
+
+		if((GPIOA->IDR & 0x00000001) == 0) //switch pressed (PA0 LOW)
+		{
+			GPIOC->ODR &= ~(0x00002000); // LED ON
+		}else{
+			GPIOC->ODR |=  0x00002000; // LED OFF
+		}
+	}
+}
