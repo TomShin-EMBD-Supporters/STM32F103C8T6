@@ -1,0 +1,139 @@
+#include "stm32f1xx.h"
+
+void Clock_Init(void)
+{
+    /* ============================================================
+     * (1) Flash wait state setting
+     *  - 72MHz @ 2.0~3.6V → 2 wait states
+     * ============================================================ */
+    FLASH->ACR &= ~(0x7);		   // LATENCY realted bits clear
+    FLASH->ACR |=  (0x2);          // LATENCY = 2WS, resolve Speed Difference BTWN FLASH Memory and CPU
+    FLASH->ACR |=  (1 << 4);       // Prefetch enable, bring next CMD in advance
+
+
+    /* ============================================================
+     * (2) Enable HSI and use it as SYSCLK (safe clock)
+     * ============================================================ */
+    RCC->CR |= (1 << 0);           // HSION
+    while (!(RCC->CR & (1 << 1))); // HSIRDY bit is 1 --> HSI is working now! --> "FALSE"
+
+    RCC->CFGR &= ~(0x3 << 0);      // SW = HSI
+    while (((RCC->CFGR >> 2) & 0x3) != 0x0); // SWS = HSI, when SWS bits are 0b00 --> HSI is selected for SYSCLK --> FALSE"
+
+
+    /* ============================================================
+     * (3) Enable HSE
+     * ============================================================ */
+    RCC->CR |= (1 << 16);          // HSEON
+    while (!(RCC->CR & (1 << 17))); // HSERDY,  when HSERDY bit is 1 --> HSE is working now! --> "FALSE"
+
+
+    /* ============================================================
+     * (4) Disable PLL before configuration
+     * ============================================================ */
+    RCC->CR &= ~(1 << 24);         // PLLON = 0
+    while (RCC->CR & (1 << 25));   // wait until PLLRDY = 0 --> PLL is ready to be modified --> "FALSE"
+
+
+    /* ============================================================
+     * (5) PLL configuration
+     *  HSE = 8MHz
+     *  PLLSRC = HSE
+     *  PLLMUL = x9 → 72MHz
+     * ============================================================ */
+    RCC->CFGR &= ~((0xF << 18) | (1 << 16)); //PLL related initialization (PLLMUL, PLLSRC)
+    RCC->CFGR |=  ((7 << 18) | (1 << 16)); // PLLMUL x9, PLLSRC = HSE
+
+
+    /* ============================================================
+     * (6) AHB / APB Prescaler
+     * ============================================================ */
+    RCC->CFGR &= ~(0xF << 4);      // AHB = SYSCLK /1
+
+    RCC->CFGR &= ~(0x7 << 8);
+    RCC->CFGR |=  (0x4 << 8);      // APB1 = AHB /2 (36MHz)
+
+    RCC->CFGR &= ~(0x7 << 11);
+    RCC->CFGR |=  (0x4 << 11);     // APB2 = AHB /2 (36MHz)
+
+
+    /* ============================================================
+     * (7) Enable PLL
+     * ============================================================ */
+    RCC->CR |= (1 << 24);          // PLLON
+    while (!(RCC->CR & (1 << 25))); // PLLRDY bit is 1 --> PLL is working now! --> "FALSE"
+
+
+    /* ============================================================
+     * (8) SYSCLK = PLL
+     * ============================================================ */
+    RCC->CFGR &= ~(0x3 << 0);  // clear up SW bits
+    RCC->CFGR |=  (0x2 << 0);      // SW = PLL, select PLL as SYSCLK
+
+    while (((RCC->CFGR >> 2) & 0x3) != 0x2); // SWS = PLL, when SWS bits are 0b10 --> PLL is selected for SYSCLK --> "FALSE"
+
+
+}
+
+void GPIO_EXTI_Init(void){
+
+		//Clock Configuration
+		RCC->APB2ENR &= ~(0x00000014);
+		RCC->APB2ENR |= 0x00000014;
+		//IOPAEN: IO port A clock enable
+		//IOPCEN: IO port C clock enable
+
+		//LED Configuration
+		GPIOC->CRH &= ~(0x00F00000);
+		GPIOC->CRH |= 0x00100000;//output mode & Maximum output speed 10 MHz
+		GPIOC->ODR |=  0x00002000; // LED OFF
+
+		//PA0 Switch Configuration
+		GPIOA->CRL &= ~(0x0000000F);
+		GPIOA->CRL |= 0x00000008;// input mode & input (pull-up/pull-down)
+		GPIOA->ODR |= 0x00000001;//input pull-up
+
+		// STEP 4 - AFIOEN: Alternate function I/O clock enable
+		RCC->APB2ENR &= ~(0x00000001);
+		RCC->APB2ENR |= 0x00000001;
+		AFIO->EXTICR[0] &= ~(0x0000000F);//PA0 - External interrupt
+
+
+		// STEP 5 - EXTI0 configuration
+		EXTI->IMR |= 0x00000001;// PA0 un-mask
+		EXTI->FTSR |= 0x00000001;// PA0 falling edge detection
+		//EXTI->RTSR |= 0x00000001;//	PA0 rising edge detection
+		EXTI->PR  = 0x00000001;//Equal OP->pending bit clear(0) by directly writing 1
+
+		// STEP 6
+		NVIC_EnableIRQ(EXTI0_IRQn);
+}
+
+//STEP 7
+void EXTI0_IRQHandler(void){
+
+	if(EXTI->PR & 0x00000001){ // EXTI Yes/No
+
+		EXTI->PR  = 0x00000001;// pending bit clear(0) by writing 1 again
+
+		GPIOC->ODR ^= 0x00002000; //Toggle LED
+
+
+	}
+}
+
+int main(void){
+
+	Clock_Init();//AHB(HCLK) 72MHz, APB1(PCLK1) 36MHz, APB2(PCLK2) 36MHz
+
+	GPIO_EXTI_Init();
+
+	while(1){
+
+
+	}
+
+}
+
+
+
