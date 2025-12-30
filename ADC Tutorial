@@ -1,0 +1,132 @@
+#include "stm32f1xx.h"
+//Conversion Procedure (ADON → SWSTART → EOC → DR)
+
+void Clock_Init(void)
+{
+    /* ============================================================
+     * (1) Flash wait state setting
+     *  - 72MHz @ 2.0~3.6V → 2 wait states
+     * ============================================================ */
+    FLASH->ACR &= ~(0x7);		   // LATENCY realted bits clear
+    FLASH->ACR |=  (0x2);          // LATENCY = 2WS, resolve Speed Difference BTWN FLASH Memory and CPU
+    FLASH->ACR |=  (1 << 4);       // Prefetch enable, bring next CMD in advance
+
+
+    /* ============================================================
+     * (2) Enable HSI and use it as SYSCLK (safe clock)
+     * ============================================================ */
+    RCC->CR |= (1 << 0);           // HSION
+    while (!(RCC->CR & (1 << 1))); // HSIRDY bit is 1 --> HSI is working now! --> "FALSE"
+
+    RCC->CFGR &= ~(0x3 << 0);      // SW = HSI
+    while (((RCC->CFGR >> 2) & 0x3) != 0x0); // SWS = HSI, when SWS bits are 0b00 --> HSI is selected for SYSCLK --> FALSE"
+
+
+    /* ============================================================
+     * (3) Enable HSE
+     * ============================================================ */
+    RCC->CR |= (1 << 16);          // HSEON
+    while (!(RCC->CR & (1 << 17))); // HSERDY,  when HSERDY bit is 1 --> HSE is working now! --> "FALSE"
+
+
+    /* ============================================================
+     * (4) Disable PLL before configuration
+     * ============================================================ */
+    RCC->CR &= ~(1 << 24);         // PLLON = 0
+    while (RCC->CR & (1 << 25));   // wait until PLLRDY = 0 --> PLL is ready to be modified --> "FALSE"
+
+
+    /* ============================================================
+     * (5) PLL configuration
+     *  HSE = 8MHz
+     *  PLLSRC = HSE
+     *  PLLMUL = x9 → 72MHz
+     * ============================================================ */
+    RCC->CFGR &= ~((0xF << 18) | (1 << 16)); //PLL related initialization (PLLMUL, PLLSRC)
+    RCC->CFGR |=  ((7 << 18) | (1 << 16)); // PLLMUL x9, PLLSRC = HSE
+
+
+    /* ============================================================
+     * (6) AHB / APB Prescaler
+     * ============================================================ */
+    RCC->CFGR &= ~(0xF << 4);      // AHB = SYSCLK /1
+
+    RCC->CFGR &= ~(0x7 << 8);
+    RCC->CFGR |=  (0x4 << 8);      // APB1 = AHB /2 (36MHz)
+
+    RCC->CFGR &= ~(0x7 << 11);
+    RCC->CFGR |=  (0x4 << 11);     // APB2 = AHB /2 (36MHz)
+
+
+    /* ============================================================
+     * (7) Enable PLL
+     * ============================================================ */
+    RCC->CR |= (1 << 24);          // PLLON
+    while (!(RCC->CR & (1 << 25))); // PLLRDY bit is 1 --> PLL is working now! --> "FALSE"
+
+
+    /* ============================================================
+     * (8) SYSCLK = PLL
+     * ============================================================ */
+    RCC->CFGR &= ~(0x3 << 0);  // clear up SW bits
+    RCC->CFGR |=  (0x2 << 0);      // SW = PLL, select PLL as SYSCLK
+
+    while (((RCC->CFGR >> 2) & 0x3) != 0x2); // SWS = PLL, when SWS bits are 0b10 --> PLL is selected for SYSCLK --> "FALSE"
+
+
+}
+
+
+#define VREF 3.3f
+#define RES 4095.0f //12bit resolution 2^12 = 4096
+volatile uint16_t adc = 0;
+volatile float vr_V = 0.0f;
+
+int main(void){
+
+		Clock_Init();//AHB(HCLK) 72MHz, APB1(PCLK1) 36MHz, APB2(PCLK2) 36MHz
+
+
+
+		//STEP 1 PB0 Configuration
+		RCC->APB2ENR &= ~(0x00000008); // IOPBEN: IO port B clock enable
+		RCC->APB2ENR |= 0x00000008;
+		GPIOB->CRL &= ~(0x0000000F);//  PB0 -> analog mode
+
+		//STEP 2 ADC Configuration
+		RCC->APB2ENR &= ~(0x1 << 9);// ADC1 clock enable
+		RCC->APB2ENR |= 0x1 << 9;
+		RCC->CFGR &= ~(0x0000C000);
+		RCC->CFGR |= 0x00004000; //ADC PRE div 4
+		//36MHz / 4 = 9MHz
+
+		//STEP 3 Extra ADC Configuration
+		//PB0 --> ADC1_IN8
+		ADC1->CR2 = 0x000E0001;
+		//EXTSEL ->SWSTART enable, ADON first time enable, CONT 0 (Single conversion mode)
+
+		ADC1->SMPR2 |= 0x05000000;//ADC1_CH8, 55.5 cycle --> 55.5 cycles / 9MHz ≈ 6.17 µs
+
+		// SQR1	L --> 0b0000  Single channel mode
+		ADC1->SQR3 &= ~(0x0000001F); // clear up 5bits (SQ1 bits)
+		ADC1->SQR3 |= 0x00000008; //CH8 in first Conversion
+
+
+
+	//Conversion Procedure
+	while(1){
+				ADC1->CR2 |= 0x00000001; //ADON second time enable
+				ADC1->CR2 |= 0x00400000; //SWSTART
+
+				while((ADC1->SR & 0x00000002) == 0);
+
+				adc = ADC1->DR;
+
+				vr_V = (adc * VREF) / RES;
+
+	}
+
+}
+
+
+
