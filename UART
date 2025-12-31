@@ -1,0 +1,155 @@
+#include "stm32f1xx.h"
+
+void Clock_Init(void)
+{
+    /* ============================================================
+     * (1) Flash wait state setting
+     *  - 72MHz @ 2.0~3.6V → 2 wait states
+     * ============================================================ */
+    FLASH->ACR &= ~(0x7);		   // LATENCY realted bits clear
+    FLASH->ACR |=  (0x2);          // LATENCY = 2WS, resolve Speed Difference BTWN FLASH Memory and CPU
+    FLASH->ACR |=  (1 << 4);       // Prefetch enable, bring next CMD in advance
+
+
+    /* ============================================================
+     * (2) Enable HSI and use it as SYSCLK (safe clock)
+     * ============================================================ */
+    RCC->CR |= (1 << 0);           // HSION
+    while (!(RCC->CR & (1 << 1))); // HSIRDY bit is 1 --> HSI is working now! --> "FALSE"
+
+    RCC->CFGR &= ~(0x3 << 0);      // SW = HSI
+    while (((RCC->CFGR >> 2) & 0x3) != 0x0); // SWS = HSI, when SWS bits are 0b00 --> HSI is selected for SYSCLK --> FALSE"
+
+
+    /* ============================================================
+     * (3) Enable HSE
+     * ============================================================ */
+    RCC->CR |= (1 << 16);          // HSEON
+    while (!(RCC->CR & (1 << 17))); // HSERDY,  when HSERDY bit is 1 --> HSE is working now! --> "FALSE"
+
+
+    /* ============================================================
+     * (4) Disable PLL before configuration
+     * ============================================================ */
+    RCC->CR &= ~(1 << 24);         // PLLON = 0
+    while (RCC->CR & (1 << 25));   // wait until PLLRDY = 0 --> PLL is ready to be modified --> "FALSE"
+
+
+    /* ============================================================
+     * (5) PLL configuration
+     *  HSE = 8MHz
+     *  PLLSRC = HSE
+     *  PLLMUL = x9 → 72MHz
+     * ============================================================ */
+    RCC->CFGR &= ~((0xF << 18) | (1 << 16)); //PLL related initialization (PLLMUL, PLLSRC)
+    RCC->CFGR |=  ((7 << 18) | (1 << 16)); // PLLMUL x9, PLLSRC = HSE
+
+
+    /* ============================================================
+     * (6) AHB / APB Prescaler
+     * ============================================================ */
+    RCC->CFGR &= ~(0xF << 4);      // AHB = SYSCLK /1
+
+    RCC->CFGR &= ~(0x7 << 8);
+    RCC->CFGR |=  (0x4 << 8);      // APB1 = AHB /2 (36MHz)
+
+    RCC->CFGR &= ~(0x7 << 11);
+    RCC->CFGR |=  (0x4 << 11);     // APB2 = AHB /2 (36MHz)
+
+
+    /* ============================================================
+     * (7) Enable PLL
+     * ============================================================ */
+    RCC->CR |= (1 << 24);          // PLLON
+    while (!(RCC->CR & (1 << 25))); // PLLRDY bit is 1 --> PLL is working now! --> "FALSE"
+
+
+    /* ============================================================
+     * (8) SYSCLK = PLL
+     * ============================================================ */
+    RCC->CFGR &= ~(0x3 << 0);  // clear up SW bits
+    RCC->CFGR |=  (0x2 << 0);      // SW = PLL, select PLL as SYSCLK
+
+    while (((RCC->CFGR >> 2) & 0x3) != 0x2); // SWS = PLL, when SWS bits are 0b10 --> PLL is selected for SYSCLK --> "FALSE"
+
+
+}
+
+
+void UART2_Init(void){
+
+	RCC->APB1ENR |= 0x00020000;//USART2EN: USART 2 clock enable
+
+	//PA2, PA3
+	RCC->APB2ENR |= 0x00000004; //IOPAEN: I/O port A clock enable
+
+	RCC->APB2ENR |= 0x00000001;//AFIOEN: Alternate function IO clock enable
+
+	AFIO->MAPR &= ~(1 << 3); // USART2_REMAP = 0, (PA2, PA3)
+
+
+
+	 	 /*  GPIO */
+	    // PA2 (TX) : AF Push-Pull, 50MHz
+	    GPIOA->CRL &= ~(0xF << (2 * 4));
+	    GPIOA->CRL |=  (0xB << (2 * 4));      // 1011: AF PP, 50MHz
+
+	    // PA3 (RX) : Input Floating
+	    GPIOA->CRL &= ~(0xF << (3 * 4));
+	    GPIOA->CRL |=  (0x4 << (3 * 4));      // 0100: Input floating
+
+	    USART2->CR1 = 0;
+	    USART2->CR2 = 0;
+	    USART2->CR3 = 0;
+
+	    //APB1 36MHz / 9600bps --> 3750
+	    USART2->BRR = 3750;
+
+	    USART2->CR1 |= 0x0000200C; // TE, RE, UE enable
+
+}
+
+void UART2_TxChar(char ch){
+
+	while(!(USART2->SR & 0x00000080));
+	USART2->DR = (uint8_t)ch;
+
+
+}
+
+char UART2_RxChar(void){
+
+	while(!(USART2->SR & 0x00000020));
+	return (char)(USART2->DR & 0xFF);
+
+}
+
+uint8_t data = 0;
+
+int main(){
+
+
+	Clock_Init(); // HCLK 72MHz, PCLK1 PCLK2 36MHz
+	UART2_Init();
+
+	while(1){
+
+		data = UART2_RxChar();
+
+		if(data <= 'Z' && data >= 'A')
+		{
+			UART2_TxChar(data + 32);
+		}
+
+		else if(data <='z' && data >= 'a')
+		{
+			UART2_TxChar(data - 32);
+		}
+		else
+		{
+			UART2_TxChar(data + 1);
+		}
+
+	}
+
+}
